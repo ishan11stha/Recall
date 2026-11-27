@@ -1,35 +1,50 @@
-import React from 'react';
-import { Pressable, ScrollView, StyleSheet } from 'react-native';
-import { Camera, Image as ImageIcon, Paperclip } from 'lucide-react-native';
+import React, { useState } from 'react';
+import { Pressable, StyleSheet, View } from 'react-native';
+import {
+  Bold,
+  Camera,
+  CheckSquare,
+  Heading,
+  Highlighter,
+  Image as ImageIcon,
+  Italic,
+  List,
+  Palette,
+  Paperclip,
+  Quote,
+  Strikethrough,
+  Underline,
+} from 'lucide-react-native';
 import { useTheme } from '../../theme/ThemeProvider';
-import { AppText } from '../ui/AppText';
+
+export type TextColorKey = 'default' | 'accent' | 'green' | 'amber' | 'red' | 'muted';
 
 export interface FormatAction {
-  key: string;
-  label: string;
-  prefix: string;
-  suffix?: string;
-  lineStart?: boolean;
+  key:
+    | 'check'
+    | 'heading'
+    | 'bold'
+    | 'italic'
+    | 'underline'
+    | 'strike'
+    | 'highlight'
+    | 'bullet'
+    | 'quote';
 }
 
-const FORMAT_ACTIONS: FormatAction[] = [
-  { key: 'wikilink', label: '[[]]', prefix: '[[', suffix: ']]' },
-  { key: 'tag', label: '#tag', prefix: '#' },
-  { key: 'h1', label: 'H1', prefix: '# ', lineStart: true },
-  { key: 'h2', label: 'H2', prefix: '## ', lineStart: true },
-  { key: 'bold', label: 'B', prefix: '**', suffix: '**' },
-  { key: 'italic', label: 'I', prefix: '*', suffix: '*' },
-  { key: 'highlight', label: '==', prefix: '==', suffix: '==' },
-  { key: 'check', label: '☑', prefix: '- [ ] ', lineStart: true },
-  { key: 'bullet', label: '•', prefix: '- ', lineStart: true },
-  { key: 'callout', label: 'Callout', prefix: '> [!note] ', lineStart: true },
-  { key: 'quote', label: 'Quote', prefix: '> ', lineStart: true },
-  { key: 'code', label: 'Code', prefix: '```\n', suffix: '\n```' },
-  { key: 'hr', label: '---', prefix: '\n---\n' },
+const PRIMARY_ACTIONS: { key: FormatAction['key']; label: string; Icon: typeof CheckSquare }[] = [
+  { key: 'check', label: 'Checkbox', Icon: CheckSquare },
+  { key: 'heading', label: 'Heading', Icon: Heading },
+  { key: 'bold', label: 'Bold', Icon: Bold },
+  { key: 'italic', label: 'Italic', Icon: Italic },
+  { key: 'underline', label: 'Underline', Icon: Underline },
+  { key: 'bullet', label: 'Bullet list', Icon: List },
+  { key: 'quote', label: 'Quote', Icon: Quote },
 ];
 
 interface MarkdownToolbarProps {
   onApply: (action: FormatAction) => void;
+  onApplyColor?: (color: TextColorKey) => void;
   onCapturePhoto?: () => void;
   onAttachImage?: () => void;
   onAttachFile?: () => void;
@@ -37,108 +52,216 @@ interface MarkdownToolbarProps {
 
 export function MarkdownToolbar({
   onApply,
+  onApplyColor,
   onCapturePhoto,
   onAttachImage,
   onAttachFile,
 }: MarkdownToolbarProps) {
   const { colors, radius } = useTheme();
+  const [paletteOpen, setPaletteOpen] = useState(false);
+
+  const swatches: { key: TextColorKey; hex: string; label: string }[] = [
+    { key: 'default', hex: colors.textPrimary, label: 'Default color' },
+    { key: 'accent', hex: colors.accent, label: 'Indigo' },
+    { key: 'green', hex: colors.success, label: 'Green' },
+    { key: 'amber', hex: colors.warning, label: 'Amber' },
+    { key: 'red', hex: colors.danger, label: 'Red' },
+    { key: 'muted', hex: colors.textSecondary, label: 'Muted' },
+  ];
+
   return (
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      keyboardShouldPersistTaps="always"
-      contentContainerStyle={[
-        styles.bar,
-        { backgroundColor: colors.surface, borderTopColor: colors.border },
-      ]}
-    >
-      {onCapturePhoto ? (
-        <Pressable
-          accessibilityLabel="Take photo"
-          onPress={onCapturePhoto}
-          style={({ pressed }) => [
-            styles.btn,
-            {
-              backgroundColor: pressed ? colors.surfaceSubtle : 'transparent',
-              borderColor: colors.border,
-              borderRadius: radius.sm,
-            },
+    <View style={{ flexShrink: 0, flexGrow: 0 }}>
+      {/* Compact Color & Extra-Style Popover Strip */}
+      {paletteOpen ? (
+        <View
+          style={[
+            styles.paletteRow,
+            { backgroundColor: colors.surfaceSubtle, borderTopColor: colors.border },
           ]}
         >
-          <Camera size={15} color={colors.accent} strokeWidth={1.75} />
-        </Pressable>
-      ) : null}
-      {onAttachImage ? (
-        <Pressable
-          accessibilityLabel="Insert image"
-          onPress={onAttachImage}
-          style={({ pressed }) => [
-            styles.btn,
-            {
-              backgroundColor: pressed ? colors.surfaceSubtle : 'transparent',
-              borderColor: colors.border,
-              borderRadius: radius.sm,
-            },
-          ]}
-        >
-          <ImageIcon size={15} color={colors.accent} strokeWidth={1.75} />
-        </Pressable>
+          <View style={styles.swatchGroup}>
+            {swatches.map((sw) => (
+              <Pressable
+                key={sw.key}
+                accessibilityLabel={sw.label}
+                onPress={() => {
+                  onApplyColor?.(sw.key);
+                  setPaletteOpen(false);
+                }}
+                hitSlop={6}
+                style={[
+                  styles.swatch,
+                  { backgroundColor: sw.hex, borderColor: colors.border },
+                ]}
+              />
+            ))}
+          </View>
+
+          <View style={[styles.sep, { backgroundColor: colors.border }]} />
+
+          <View style={styles.extraGroup}>
+            <Pressable
+              accessibilityLabel="Highlight"
+              onPress={() => {
+                onApply({ key: 'highlight' });
+                setPaletteOpen(false);
+              }}
+              hitSlop={4}
+              style={[styles.btn, { borderRadius: radius.sm }]}
+            >
+              <Highlighter size={16} color={colors.warning} strokeWidth={1.8} />
+            </Pressable>
+            <Pressable
+              accessibilityLabel="Strikethrough"
+              onPress={() => {
+                onApply({ key: 'strike' });
+                setPaletteOpen(false);
+              }}
+              hitSlop={4}
+              style={[styles.btn, { borderRadius: radius.sm }]}
+            >
+              <Strikethrough size={16} color={colors.textPrimary} strokeWidth={1.8} />
+            </Pressable>
+          </View>
+        </View>
       ) : null}
 
-      {onAttachFile ? (
-        <Pressable
-          accessibilityLabel="Attach file or PDF"
-          onPress={onAttachFile}
-          style={({ pressed }) => [
-            styles.btn,
-            {
-              backgroundColor: pressed ? colors.surfaceSubtle : 'transparent',
-              borderColor: colors.border,
-              borderRadius: radius.sm,
-            },
-          ]}
-        >
-          <Paperclip size={15} color={colors.accent} strokeWidth={1.75} />
-        </Pressable>
-      ) : null}
+      {/* Main Single-Row Compact Toolbar */}
+      <View
+        style={[
+          styles.wrapper,
+          { backgroundColor: colors.surface, borderTopColor: colors.border },
+        ]}
+      >
+        {PRIMARY_ACTIONS.map(({ Icon, label, key }) => (
+          <Pressable
+            key={key}
+            accessibilityLabel={label}
+            onPress={() => onApply({ key })}
+            hitSlop={3}
+            style={({ pressed }) => [
+              styles.btn,
+              {
+                backgroundColor: pressed ? colors.accentSoft : 'transparent',
+                borderRadius: radius.sm,
+              },
+            ]}
+          >
+            <Icon size={16} color={colors.textPrimary} strokeWidth={1.8} />
+          </Pressable>
+        ))}
 
-      {FORMAT_ACTIONS.map((action) => (
-        <Pressable
-          key={action.key}
-          onPress={() => onApply(action)}
-          style={({ pressed }) => [
-            styles.btn,
-            {
-              backgroundColor: pressed ? colors.surfaceSubtle : 'transparent',
-              borderColor: colors.border,
-              borderRadius: radius.sm,
-            },
-          ]}
-        >
-          <AppText variant="caption" style={{ fontWeight: '600' }}>
-            {action.label}
-          </AppText>
-        </Pressable>
-      ))}
-    </ScrollView>
+        {onApplyColor ? (
+          <Pressable
+            accessibilityLabel="Text color and highlight"
+            onPress={() => setPaletteOpen((o) => !o)}
+            hitSlop={3}
+            style={({ pressed }) => [
+              styles.btn,
+              {
+                backgroundColor:
+                  paletteOpen || pressed ? colors.accentSoft : 'transparent',
+                borderRadius: radius.sm,
+              },
+            ]}
+          >
+            <Palette
+              size={16}
+              color={paletteOpen ? colors.accent : colors.textPrimary}
+              strokeWidth={1.8}
+            />
+          </Pressable>
+        ) : null}
+
+        <View style={[styles.sep, { backgroundColor: colors.border }]} />
+
+        {onCapturePhoto ? (
+          <Pressable
+            accessibilityLabel="Take photo"
+            onPress={onCapturePhoto}
+            hitSlop={3}
+            style={({ pressed }) => [
+              styles.btn,
+              { backgroundColor: pressed ? colors.accentSoft : 'transparent', borderRadius: radius.sm },
+            ]}
+          >
+            <Camera size={16} color={colors.accent} strokeWidth={1.8} />
+          </Pressable>
+        ) : null}
+
+        {onAttachImage ? (
+          <Pressable
+            accessibilityLabel="Insert image"
+            onPress={onAttachImage}
+            hitSlop={3}
+            style={({ pressed }) => [
+              styles.btn,
+              { backgroundColor: pressed ? colors.accentSoft : 'transparent', borderRadius: radius.sm },
+            ]}
+          >
+            <ImageIcon size={16} color={colors.accent} strokeWidth={1.8} />
+          </Pressable>
+        ) : null}
+
+        {onAttachFile ? (
+          <Pressable
+            accessibilityLabel="Attach file"
+            onPress={onAttachFile}
+            hitSlop={3}
+            style={({ pressed }) => [
+              styles.btn,
+              { backgroundColor: pressed ? colors.accentSoft : 'transparent', borderRadius: radius.sm },
+            ]}
+          >
+            <Paperclip size={16} color={colors.accent} strokeWidth={1.8} />
+          </Pressable>
+        ) : null}
+      </View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  bar: {
+  paletteRow: {
+    height: 40,
+    borderTopWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
+  },
+  swatchGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  swatch: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  extraGroup: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+  },
+  wrapper: {
+    height: 44,
     borderTopWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-evenly',
+    paddingHorizontal: 4,
   },
   btn: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderWidth: 1,
-    minHeight: 32,
+    width: 30,
+    height: 32,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  sep: {
+    width: 1,
+    height: 18,
   },
 });

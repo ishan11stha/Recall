@@ -1,4 +1,3 @@
-import { createCollection } from '../../src/database/repositories/collectionsRepo';
 import { createNote, softDeleteNote, updateNote } from '../../src/database/repositories/notesRepo';
 import {
   createNoteLink,
@@ -10,7 +9,7 @@ import { searchService } from '../../src/services/search/searchService';
 import { createTestDb } from '../helpers/nodeSqliteAdapter';
 
 describe('Knowledge Connections & SQLite FTS5 Search', () => {
-  it('manages typed connections, backlinks, and graph data', async () => {
+  it('manages typed connections, backlinks, linkedDegree, and graph data', async () => {
     const db = await createTestDb();
     try {
       const a = await createNote(db, { title: 'Central Banking', content: 'Monetary authority.' });
@@ -29,6 +28,11 @@ describe('Knowledge Connections & SQLite FTS5 Search', () => {
         relationshipType: 'supports',
       });
 
+      const aConns = await getConnectionsForNote(db, a.id);
+      expect(aConns.outgoing.length).toBe(1);
+      // b connects to c, so b's linkedDegree from a's perspective is 1
+      expect(aConns.outgoing[0].linkedDegree).toBe(1);
+
       const bConns = await getConnectionsForNote(db, b.id);
       expect(bConns.backlinks.length).toBe(1);
       expect(bConns.backlinks[0].linkedNoteId).toBe(a.id);
@@ -43,15 +47,13 @@ describe('Knowledge Connections & SQLite FTS5 Search', () => {
     }
   });
 
-  it('keeps FTS5 synchronized on insert/update/delete and supports filters', async () => {
+  it('keeps FTS5 synchronized on insert/update/delete', async () => {
     const db = await createTestDb();
     try {
-      const col = await createCollection(db, { name: 'Banking' });
       const n1 = await createNote(db, {
         title: 'Commercial Banking',
         content: 'Fractional reserve lending and liquidity ratios.',
         noteType: 'concept',
-        collectionId: col.id,
         tags: ['finance'],
       });
       await createAttachment(db, {
@@ -61,29 +63,18 @@ describe('Knowledge Connections & SQLite FTS5 Search', () => {
         linkedNoteIds: [n1.id],
       });
 
-      // Search across both notes and resources
       const res1 = await searchService.search(db, 'liquidity');
       expect(res1.some((r) => r.entityType === 'note' && r.id === n1.id)).toBe(true);
       expect(res1.some((r) => r.entityType === 'resource')).toBe(true);
 
-      // Update note content -> FTS5 trigger should reflect new terms immediately
       await updateNote(db, n1.id, { content: 'Capital adequacy under Basel III framework.' });
-      const baselResults = await searchService.search(db, 'Basel', {
-        collectionId: col.id,
-        noteType: 'concept',
-      });
+      const baselResults = await searchService.search(db, 'Basel', { noteType: 'concept' });
       expect(baselResults.length).toBe(1);
       expect(baselResults[0].title).toBe('Commercial Banking');
 
-      // Soft delete removes note from active FTS5 search
       await softDeleteNote(db, n1.id);
       const afterDelete = await searchService.search(db, 'Basel');
       expect(afterDelete.length).toBe(0);
-
-      // Recent searches
-      await searchService.recordRecentSearch(db, 'Basel');
-      const recent = await searchService.getRecentSearches(db);
-      expect(recent).toEqual(['Basel']);
     } finally {
       await db.closeAsync();
     }

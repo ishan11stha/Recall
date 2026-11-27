@@ -68,14 +68,25 @@ export default function ReviewScreen() {
           {allCards.length} {allCards.length === 1 ? 'card' : 'cards'} total · FSRS spaced repetition
         </AppText>
 
-        {dueCards.length > 0 ? (
+        <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
+          {dueCards.length > 0 ? (
+            <Button
+              label="Start Review"
+              icon={<Play size={15} color={colors.accentText} />}
+              onPress={() => router.push('/flashcards/session')}
+            />
+          ) : null}
           <Button
-            label="Start Review"
-            icon={<Play size={15} color={colors.accentText} />}
-            onPress={() => router.push('/flashcards/session')}
-            style={{ marginTop: 10 }}
+            label="From Paragraph"
+            variant={dueCards.length > 0 ? 'secondary' : 'primary'}
+            onPress={() =>
+              router.push({
+                pathname: '/flashcards/edit/[id]',
+                params: { id: 'new', mode: 'paragraph' },
+              })
+            }
           />
-        ) : null}
+        </View>
       </View>
 
       <Divider style={{ marginHorizontal: 22 }} />

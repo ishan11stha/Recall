@@ -1,13 +1,68 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Image, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { FileText } from 'lucide-react-native';
 import { useTheme } from '../../theme/ThemeProvider';
+import type { Attachment } from '../../types/models';
+import { formatBytes } from '../../utils/id';
 import { AppText } from '../ui/AppText';
 
 interface MarkdownRendererProps {
   content: string;
+  attachments?: Attachment[];
   onToggleChecklistLine?: (lineIndex: number) => void;
   onPressWikilink?: (targetTitle: string) => void;
   onPressLink?: (url: string) => void;
+}
+
+function ResponsiveNoteImage({
+  uri,
+  onPress,
+}: {
+  uri: string;
+  onPress?: () => void;
+}) {
+  const { colors, radius } = useTheme();
+  const [aspectRatio, setAspectRatio] = useState<number>(4 / 3);
+
+  useEffect(() => {
+    let active = true;
+    Image.getSize(
+      uri,
+      (w, h) => {
+        if (active && w > 0 && h > 0) {
+          setAspectRatio(Math.max(0.55, Math.min(2.2, w / h)));
+        }
+      },
+      () => {}
+    );
+    return () => {
+      active = false;
+    };
+  }, [uri]);
+
+  return (
+    <Pressable
+      onPress={(e) => {
+        e.stopPropagation();
+        onPress?.();
+      }}
+      style={{ marginVertical: 10 }}
+    >
+      <Image
+        source={{ uri }}
+        style={{
+          width: '100%',
+          aspectRatio,
+          maxHeight: 420,
+          borderRadius: radius.md,
+          borderWidth: 1,
+          borderColor: colors.border,
+          backgroundColor: colors.surfaceSubtle,
+        }}
+        resizeMode="contain"
+      />
+    </Pressable>
+  );
 }
 
 interface InlineContext {
@@ -23,7 +78,7 @@ interface InlineContext {
 
 function renderInlineSpans(line: string, ctx: InlineContext): React.ReactNode[] {
   const regex =
-    /(\[\[[^[\]]+\]\]|==[^=]+==|~~[^~]+~~|\*\*[^*]+\*\*|\*[^*]+\*|<u>[^<]+<\/u>|`[^`]+`|\[[^\]]+\]\([^)]+\)|(?:^|\s)#[a-zA-Z][a-zA-Z0-9_-]*)/g;
+    /(\[\[[^[\]]+\]\]|==[^=]+==|~~[^~]+~~|\*\*[^*]+\*\*|__[^_]+__|\*[^*\n]+\*|_[^_\n]+_|<u>[^<]+<\/u>|`[^`]+`|\[[^\]]+\]\([^)]+\)|(?:^|\s)#[a-zA-Z][a-zA-Z0-9_-]*)/g;
   const parts = line.split(regex);
 
   return parts.map((part, idx) => {
@@ -81,7 +136,10 @@ function renderInlineSpans(line: string, ctx: InlineContext): React.ReactNode[] 
       );
     }
 
-    if (part.startsWith('**') && part.endsWith('**')) {
+    if (
+      (part.startsWith('**') && part.endsWith('**') && part.length > 4) ||
+      (part.startsWith('__') && part.endsWith('__') && part.length > 4)
+    ) {
       return (
         <Text key={idx} style={{ fontWeight: '700', color: ctx.baseColor }}>
           {part.slice(2, -2)}
@@ -89,7 +147,10 @@ function renderInlineSpans(line: string, ctx: InlineContext): React.ReactNode[] 
       );
     }
 
-    if (part.startsWith('*') && part.endsWith('*')) {
+    if (
+      (part.startsWith('*') && part.endsWith('*') && part.length > 2) ||
+      (part.startsWith('_') && part.endsWith('_') && part.length > 2)
+    ) {
       return (
         <Text key={idx} style={{ fontStyle: 'italic', color: ctx.baseColor }}>
           {part.slice(1, -1)}
@@ -159,6 +220,7 @@ function renderInlineSpans(line: string, ctx: InlineContext): React.ReactNode[] 
 
 export function MarkdownRenderer({
   content,
+  attachments = [],
   onToggleChecklistLine,
   onPressWikilink,
   onPressLink,
@@ -217,26 +279,67 @@ export function MarkdownRenderer({
       return;
     }
 
-    // Inline Image: ![alt](uri)
+    // Clean wiki-embed: ![[filename]] (resolves from note attachments with no file:// URL shown)
+    const embedMatch = rawLine.trim().match(/^!\[\[([^[\]]+)\]\]$/);
+    if (embedMatch) {
+      const targetName = embedMatch[1].trim();
+      const att = attachments.find(
+        (a) => a.title.toLowerCase() === targetName.toLowerCase()
+      );
+      if (att?.localUri) {
+        const isImg =
+          att.fileType === 'image' || (att.mimeType ?? '').startsWith('image/');
+        if (isImg) {
+          blocks.push(
+            <ResponsiveNoteImage
+              key={index}
+              uri={att.localUri}
+              onPress={() => onPressLink?.(att.localUri!)}
+            />
+          );
+          return;
+        }
+        blocks.push(
+          <Pressable
+            key={index}
+            onPress={(e) => {
+              e.stopPropagation();
+              onPressLink?.(att.localUri!);
+            }}
+            style={[
+              styles.fileEmbed,
+              {
+                backgroundColor: colors.surface,
+                borderColor: colors.border,
+                borderRadius: radius.sm,
+              },
+            ]}
+          >
+            <FileText size={16} color={colors.accent} />
+            <View style={{ flex: 1 }}>
+              <AppText variant="bodySmall" numberOfLines={1}>
+                {att.title}
+              </AppText>
+              <AppText variant="caption" color="tertiary" tabular>
+                {formatBytes(att.fileSizeBytes)}
+              </AppText>
+            </View>
+          </Pressable>
+        );
+        return;
+      }
+    }
+
+    // Legacy inline image: ![alt](uri)
     const imgMatch = rawLine.trim().match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
     if (imgMatch) {
-      const [, alt, uri] = imgMatch;
+      const [, , uri] = imgMatch;
       blocks.push(
-        <View key={index} style={{ marginVertical: 8, gap: 4 }}>
-          <Image
-            source={{ uri }}
-            style={[
-              styles.inlineImage,
-              { borderRadius: radius.md, borderColor: colors.border },
-            ]}
-            resizeMode="cover"
-          />
-          {alt ? (
-            <AppText variant="caption" color="tertiary">
-              {alt}
-            </AppText>
-          ) : null}
-        </View>
+        <ResponsiveNoteImage
+          key={index}
+          uri={uri}
+          onPress={() => onPressLink?.(uri)}
+        />
       );
       return;
     }
@@ -267,15 +370,22 @@ export function MarkdownRenderer({
       return;
     }
 
-    // Checklist
-    const checkMatch = rawLine.match(/^\s*-\s+\[([ xX])\]\s+(.*)$/);
+    // Checklist (supports empty "- [ ]" as well as "- [ ] task")
+    const checkMatch = rawLine.match(/^\s*-\s+\[([ xX])\]\s*(.*)$/);
     if (checkMatch) {
       const checked = checkMatch[1].toLowerCase() === 'x';
       const text = checkMatch[2];
       blocks.push(
         <Pressable
           key={index}
-          onPress={onToggleChecklistLine ? () => onToggleChecklistLine(index) : undefined}
+          onPress={
+            onToggleChecklistLine
+              ? (e) => {
+                  e.stopPropagation();
+                  onToggleChecklistLine(index);
+                }
+              : undefined
+          }
           style={styles.listRow}
         >
           <View
@@ -440,10 +550,13 @@ export function MarkdownRenderer({
 }
 
 const styles = StyleSheet.create({
-  inlineImage: {
-    width: '100%',
-    height: 220,
+  fileEmbed: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    padding: 12,
     borderWidth: 1,
+    marginVertical: 8,
   },
   codeBlock: {
     borderWidth: 1,

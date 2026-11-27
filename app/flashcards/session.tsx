@@ -3,7 +3,7 @@ import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
-import { ArrowLeft, CheckCircle2 } from 'lucide-react-native';
+import { ArrowLeft, CheckCircle2, Pencil } from 'lucide-react-native';
 import { useTheme } from '../../src/theme/ThemeProvider';
 import { useAppStore } from '../../src/stores/useAppStore';
 import { getDatabase } from '../../src/database/client';
@@ -14,12 +14,16 @@ import {
 import { defaultScheduler } from '../../src/services/scheduler/fsrsScheduler';
 import type { Flashcard, ReviewRating } from '../../src/types/models';
 import { formatIntervalDays } from '../../src/utils/id';
-import { AppText } from '../../src/components/ui/AppText';
-import { Button } from '../../src/components/ui/Button';
-import { Divider } from '../../src/components/ui/Primitives';
+import { AppText, Button, Card, Divider } from '../../src/components/ui';
 
 function getCurrentEpochMs(): number {
   return Date.now();
+}
+
+function formatCloze(text: string, revealed: boolean): string {
+  return revealed
+    ? text.replace(/\{\{([^}]+)\}\}/g, '$1')
+    : text.replace(/\{\{([^}]+)\}\}/g, '[ … ]');
 }
 
 export default function ReviewSessionScreen() {
@@ -72,7 +76,7 @@ export default function ReviewSessionScreen() {
     queue.length > 0 ? Math.min(100, Math.round((index / queue.length) * 100)) : 100;
 
   return (
-    <SafeAreaView style={[styles.safe, { backgroundColor: colors.background }]} edges={['top']}>
+    <SafeAreaView style={[styles.safe, { backgroundColor: colors.background }]} edges={['top', 'bottom']}>
       <View style={styles.topBar}>
         <Pressable onPress={() => router.back()} hitSlop={12}>
           <ArrowLeft size={22} color={colors.textPrimary} strokeWidth={1.75} />
@@ -80,7 +84,17 @@ export default function ReviewSessionScreen() {
         <AppText variant="caption" color="secondary" tabular>
           {currentCard ? `${index + 1} / ${queue.length}` : 'Done'}
         </AppText>
-        <View style={{ width: 22 }} />
+        {currentCard ? (
+          <Pressable
+            accessibilityLabel="Edit card"
+            onPress={() => router.push(`/flashcards/edit/${currentCard.id}`)}
+            hitSlop={12}
+          >
+            <Pencil size={18} color={colors.textSecondary} strokeWidth={1.75} />
+          </Pressable>
+        ) : (
+          <View style={{ width: 22 }} />
+        )}
       </View>
 
       <View style={[styles.progressTrack, { backgroundColor: colors.surfaceSubtle }]}>
@@ -107,18 +121,39 @@ export default function ReviewSessionScreen() {
       ) : (
         <View style={styles.studyWrap}>
           <ScrollView contentContainerStyle={styles.cardCenter}>
-            <AppText variant="h1" style={{ textAlign: 'center' }}>
-              {currentCard.front}
-            </AppText>
+            <Card
+              onPress={() => {
+                if (!revealed) setRevealed(true);
+              }}
+              style={styles.studyCard}
+            >
+              <AppText variant="caption" color="tertiary" style={styles.eyebrow}>
+                PROMPT
+              </AppText>
+              <AppText variant="h1" style={{ textAlign: 'center' }}>
+                {formatCloze(currentCard.front, revealed)}
+              </AppText>
 
-            {revealed ? (
-              <View style={styles.answerBlock}>
-                <Divider style={{ marginVertical: 20 }} />
-                <AppText variant="body" color="secondary" style={{ textAlign: 'center' }}>
-                  {currentCard.back}
+              {!revealed ? (
+                <AppText
+                  variant="caption"
+                  color="tertiary"
+                  style={{ textAlign: 'center', marginTop: 18 }}
+                >
+                  Tap card to reveal
                 </AppText>
-              </View>
-            ) : null}
+              ) : (
+                <View style={styles.answerBlock}>
+                  <Divider style={{ marginVertical: 18 }} />
+                  <AppText variant="caption" color="accent" style={styles.eyebrow}>
+                    ANSWER
+                  </AppText>
+                  <AppText variant="body" color="primary" style={{ textAlign: 'center' }}>
+                    {currentCard.back}
+                  </AppText>
+                </View>
+              )}
+            </Card>
           </ScrollView>
 
           {!revealed ? (
@@ -132,13 +167,14 @@ export default function ReviewSessionScreen() {
             <View style={styles.ratingRow}>
               {(
                 [
-                  { rating: 1 as ReviewRating, label: 'Again', accent: false },
-                  { rating: 2 as ReviewRating, label: 'Hard', accent: false },
-                  { rating: 3 as ReviewRating, label: 'Good', accent: true },
-                  { rating: 4 as ReviewRating, label: 'Easy', accent: false },
+                  { rating: 1 as ReviewRating, label: 'Again', tone: 'danger' as const },
+                  { rating: 2 as ReviewRating, label: 'Hard', tone: 'primary' as const },
+                  { rating: 3 as ReviewRating, label: 'Good', tone: 'accent' as const },
+                  { rating: 4 as ReviewRating, label: 'Easy', tone: 'success' as const },
                 ] as const
               ).map((item) => {
                 const preview = previews?.[item.rating];
+                const isPrimary = item.tone === 'accent';
                 return (
                   <Pressable
                     key={item.rating}
@@ -146,8 +182,8 @@ export default function ReviewSessionScreen() {
                     style={({ pressed }) => [
                       styles.ratingBtn,
                       {
-                        backgroundColor: item.accent ? colors.accentSoft : colors.surface,
-                        borderColor: item.accent ? colors.accent : colors.border,
+                        backgroundColor: isPrimary ? colors.accentSoft : colors.surface,
+                        borderColor: isPrimary ? colors.accent : colors.border,
                         borderRadius: radius.md,
                         opacity: pressed ? 0.75 : 1,
                       },
@@ -155,7 +191,7 @@ export default function ReviewSessionScreen() {
                   >
                     <AppText
                       variant="label"
-                      color={item.accent ? 'accent' : 'primary'}
+                      color={item.tone}
                       style={{ fontWeight: '600' }}
                     >
                       {item.label}
@@ -204,10 +240,24 @@ const styles = StyleSheet.create({
   cardCenter: {
     flexGrow: 1,
     justifyContent: 'center',
-    paddingVertical: 24,
+    paddingVertical: 16,
+  },
+  studyCard: {
+    minHeight: 240,
+    justifyContent: 'center',
+    paddingVertical: 28,
+    paddingHorizontal: 22,
+    gap: 10,
+  },
+  eyebrow: {
+    textAlign: 'center',
+    letterSpacing: 1,
+    fontWeight: '600',
+    fontSize: 10.5,
   },
   answerBlock: {
     width: '100%',
+    gap: 6,
   },
   ratingRow: {
     flexDirection: 'row',

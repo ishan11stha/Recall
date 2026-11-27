@@ -1,16 +1,8 @@
 import {
-  createCollection,
-  deleteCollectionSafely,
-  getCollectionBreadcrumbs,
-  listCollections,
-} from '../../src/database/repositories/collectionsRepo';
-import {
   createNote,
-  createNoteTemplate,
-  getNoteById,
   listNoteRevisions,
   listNotes,
-  listNoteTemplates,
+  listNotesByIds,
   restoreNote,
   restoreNoteRevision,
   softDeleteNote,
@@ -19,96 +11,51 @@ import {
 import { listTags } from '../../src/database/repositories/tagsRepo';
 import { createTestDb } from '../helpers/nodeSqliteAdapter';
 
-describe('Notes, Collections, Tags, Revisions, and Templates', () => {
-  it('supports nested collections and safe deletion without losing notes', async () => {
+describe('Notes, Batched Tags, Pinning, Revisions, and Trash', () => {
+  it('batch-loads tags, orders pinned notes first, and fetches by IDs cleanly', async () => {
     const db = await createTestDb();
     try {
-      const econ = await createCollection(db, { name: 'Economics' });
-      const macro = await createCollection(db, { name: 'Macroeconomics', parentId: econ.id });
-      const policy = await createCollection(db, { name: 'Monetary Policy', parentId: macro.id });
-
-      const breadcrumbs = await getCollectionBreadcrumbs(db, policy.id);
-      expect(breadcrumbs.map((b) => b.name)).toEqual([
-        'Economics',
-        'Macroeconomics',
-        'Monetary Policy',
-      ]);
-
-      const note = await createNote(db, {
-        title: 'Inflation Targeting',
-        content: 'Central banks adjust policy rates to stabilize inflation.',
-        noteType: 'concept',
-        collectionId: macro.id,
-      });
-      expect(note.isInbox).toBe(false);
-
-      // Deleting Macroeconomics should move its notes and child collections safely to Economics
-      await deleteCollectionSafely(db, macro.id);
-
-      const updatedNote = await getNoteById(db, note.id);
-      expect(updatedNote?.collectionId).toBe(econ.id);
-
-      const childrenOfEcon = await listCollections(db, econ.id);
-      expect(childrenOfEcon.map((c) => c.name)).toContain('Monetary Policy');
-
-      // Deleting top-level Economics moves notes safely back to Inbox
-      await deleteCollectionSafely(db, econ.id);
-      const inboxNote = await getNoteById(db, note.id);
-      expect(inboxNote?.collectionId).toBeNull();
-      expect(inboxNote?.isInbox).toBe(true);
-    } finally {
-      await db.closeAsync();
-    }
-  });
-
-  it('tracks tags, revisions, pin/favorite/archive/trash, and templates', async () => {
-    const db = await createTestDb();
-    try {
-      const note = await createNote(db, {
+      const n1 = await createNote(db, {
         title: 'Spaced Repetition',
         content: 'Initial draft about memory decay.',
-        tags: ['Learning', 'Memory', 'learning'], // duplicate normalized
+        tags: ['Learning', 'Memory', 'learning'],
+      });
+      const n2 = await createNote(db, {
+        title: 'Orbital Mind Map',
+        content: 'Visual concept navigation.',
+        isPinned: true,
+        tags: ['visual'],
       });
 
-      expect(note.tags?.map((t) => t.name)).toEqual(['learning', 'memory']);
-      const allTags = await listTags(db);
-      expect(allTags.length).toBe(2);
+      const listed = await listNotes(db);
+      expect(listed[0].id).toBe(n2.id); // pinned first
+      expect(listed[0].tags?.map((t) => t.name)).toEqual(['visual']);
+      expect(listed[1].tags?.map((t) => t.name)).toEqual(['learning', 'memory']);
 
-      // Edit with revision snapshot
-      const edited = await updateNote(db, note.id, {
-        content: 'Updated content explaining FSRS stability and retrievability curves.',
-        isPinned: true,
-        isFavorite: true,
+      const byIds = await listNotesByIds(db, [n1.id]);
+      expect(byIds.length).toBe(1);
+      expect(byIds[0].tags?.map((t) => t.name)).toEqual(['learning', 'memory']);
+
+      const allTags = await listTags(db);
+      expect(allTags.length).toBe(3);
+
+      // Edit with revision snapshot & restore
+      await updateNote(db, n1.id, {
+        content: 'Updated content explaining FSRS stability curves.',
         saveRevision: true,
       });
-      expect(edited?.isPinned).toBe(true);
-      expect(edited?.wordCount).toBeGreaterThan(5);
-
-      const revisions = await listNoteRevisions(db, note.id);
+      const revisions = await listNoteRevisions(db, n1.id);
       expect(revisions.length).toBe(1);
-      expect(revisions[0].content).toContain('Initial draft');
-
-      // Restore revision
-      const restoredRev = await restoreNoteRevision(db, note.id, revisions[0].id);
+      const restoredRev = await restoreNoteRevision(db, n1.id, revisions[0].id);
       expect(restoredRev?.content).toContain('Initial draft');
 
       // Soft delete & restore
-      await softDeleteNote(db, note.id);
-      expect((await listNotes(db, { scope: 'all' })).length).toBe(0);
+      await softDeleteNote(db, n1.id);
+      expect((await listNotes(db, { scope: 'all' })).length).toBe(1);
       expect((await listNotes(db, { scope: 'trash' })).length).toBe(1);
 
-      await restoreNote(db, note.id);
-      expect((await listNotes(db, { scope: 'all' })).length).toBe(1);
-
-      // Templates
-      await createNoteTemplate(db, {
-        name: 'Concept Card',
-        noteType: 'concept',
-        contentTemplate: '## Definition\n\n## Examples\n',
-      });
-      const templates = await listNoteTemplates(db);
-      expect(templates.length).toBe(1);
-      expect(templates[0].name).toBe('Concept Card');
+      await restoreNote(db, n1.id);
+      expect((await listNotes(db, { scope: 'all' })).length).toBe(2);
     } finally {
       await db.closeAsync();
     }

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { Stack } from 'expo-router';
+import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -23,6 +24,8 @@ import { getDatabase } from '../src/database/client';
 import { loadAppSettings } from '../src/database/repositories/settingsRepo';
 import { ErrorBoundary } from '../src/components/ui/ErrorBoundary';
 import { AppText } from '../src/components/ui/AppText';
+
+SplashScreen.preventAutoHideAsync().catch(() => {});
 
 function RootNavigator() {
   const theme = useTheme();
@@ -102,6 +105,12 @@ export default function RootLayout() {
     PlusJakartaSans_700Bold,
     JetBrainsMono_400Regular,
   });
+
+  useEffect(() => {
+    if (fontsLoaded) {
+      SplashScreen.hideAsync().catch(() => {});
+    }
+  }, [fontsLoaded]);
 
   if (!fontsLoaded) {
     return null;

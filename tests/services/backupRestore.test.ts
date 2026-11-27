@@ -1,4 +1,3 @@
-import { createCollection } from '../../src/database/repositories/collectionsRepo';
 import { createNote, listNotes } from '../../src/database/repositories/notesRepo';
 import { createNoteLink } from '../../src/database/repositories/linksRepo';
 import {
@@ -23,7 +22,6 @@ describe('Versioned Backup, Restore, and Portable Exports', () => {
     const sourceDb = await createTestDb();
     const freshDb = await createTestDb();
 
-    // In-memory attachment file store for testing binary backup/restore
     const virtualFiles = new Map<string, string>([
       ['file:///app/recall_attachments/doc1.pdf', Buffer.from('%PDF-1.7 sample').toString('base64')],
     ]);
@@ -40,17 +38,14 @@ describe('Versioned Backup, Restore, and Portable Exports', () => {
     };
 
     try {
-      const col = await createCollection(sourceDb, { name: 'Management' });
       const n1 = await createNote(sourceDb, {
         title: 'Strategic Management',
         content: 'Competitive advantage and long-term positioning.',
-        collectionId: col.id,
         tags: ['strategy', 'core'],
       });
       const n2 = await createNote(sourceDb, {
         title: 'Organizational Behaviour',
         content: 'Human dynamics inside organizations.',
-        collectionId: col.id,
       });
       await createNoteLink(sourceDb, {
         sourceNoteId: n1.id,
@@ -68,25 +63,21 @@ describe('Versioned Backup, Restore, and Portable Exports', () => {
         front: 'Define competitive advantage',
         back: 'Attributes allowing an organization to outperform peers.',
         noteId: n1.id,
-        collectionId: col.id,
       });
       await recordFlashcardReview(sourceDb, card.id, 3);
       await saveAppSettings(sourceDb, { theme: 'dark', fontSize: 'large' });
 
-      // Export Markdown & JSON
       const md = await exportLibraryAsMarkdown(sourceDb);
       expect(md).toContain('# Strategic Management');
       const json = await exportLibraryAsJson(sourceDb);
       expect(JSON.parse(json).manifest.app).toBe('RECALL');
 
-      // Export full versioned ZIP
       const { base64, manifest } = await createBackupZipBase64(sourceDb, mockFileIO);
       expect(manifest.backupFormatVersion).toBe(1);
       expect(manifest.counts.notes).toBe(2);
       expect(manifest.counts.flashcards).toBe(1);
       expect(manifest.counts.attachments).toBe(1);
 
-      // Restore into completely fresh DB
       const restoreOutcome = await restoreFromBackupZipBase64(freshDb, base64, mockFileIO);
       expect(restoreOutcome.integrityOk).toBe(true);
 
@@ -105,7 +96,6 @@ describe('Versioned Backup, Restore, and Portable Exports', () => {
       expect(restoredSettings.theme).toBe('dark');
       expect(restoredSettings.fontSize).toBe('large');
 
-      // Verify FTS5 index was rebuilt and is immediately searchable after restore
       const searchHits = await searchService.search(freshDb, 'Competitive');
       expect(searchHits.length).toBeGreaterThanOrEqual(1);
       expect(searchHits[0].title).toBe('Strategic Management');

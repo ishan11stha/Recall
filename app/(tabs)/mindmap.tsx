@@ -30,10 +30,13 @@ export default function MindMapTabScreen() {
   }
 
   const ensureFocus = useCallback(async () => {
-    if (focusNoteId) return;
     const db = await getDatabase();
-    const notes = await listNotes(db, { limit: 1 });
-    if (notes.length > 0) {
+    const notes = await listNotes(db, { limit: 100 });
+    if (notes.length === 0) {
+      setFocusNoteId(null);
+      return;
+    }
+    if (!focusNoteId || !notes.some((n) => n.id === focusNoteId)) {
       setFocusNoteId(notes[0].id);
     }
   }, [focusNoteId]);

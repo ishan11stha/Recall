@@ -86,10 +86,14 @@ export async function deleteNoteLink(db: DatabaseAdapter, linkId: UUID): Promise
   });
 }
 
+export interface NoteLinkWithDegree extends NoteLinkDetail {
+  linkedDegree: number;
+}
+
 export async function getConnectionsForNote(
   db: DatabaseAdapter,
   noteId: UUID
-): Promise<{ outgoing: NoteLinkDetail[]; backlinks: NoteLinkDetail[] }> {
+): Promise<{ outgoing: NoteLinkWithDegree[]; backlinks: NoteLinkWithDegree[] }> {
   const outgoingRows = await db.getAllAsync<{
     id: string;
     source_note_id: string;
@@ -99,13 +103,17 @@ export async function getConnectionsForNote(
     created_at: string;
     linked_title: string;
     linked_type: string;
+    linked_degree: number;
   }>(
-    `SELECT l.*, n.title AS linked_title, n.note_type AS linked_type
+    `SELECT l.*, n.title AS linked_title, n.note_type AS linked_type,
+       (SELECT COUNT(*) FROM note_links l2
+        WHERE (l2.source_note_id = n.id OR l2.target_note_id = n.id)
+          AND l2.source_note_id != ? AND l2.target_note_id != ?) AS linked_degree
      FROM note_links l
      INNER JOIN notes n ON n.id = l.target_note_id AND n.deleted_at IS NULL
      WHERE l.source_note_id = ?
      ORDER BY l.created_at DESC`,
-    [noteId]
+    [noteId, noteId, noteId]
   );
 
   const incomingRows = await db.getAllAsync<{
@@ -117,13 +125,17 @@ export async function getConnectionsForNote(
     created_at: string;
     linked_title: string;
     linked_type: string;
+    linked_degree: number;
   }>(
-    `SELECT l.*, n.title AS linked_title, n.note_type AS linked_type
+    `SELECT l.*, n.title AS linked_title, n.note_type AS linked_type,
+       (SELECT COUNT(*) FROM note_links l2
+        WHERE (l2.source_note_id = n.id OR l2.target_note_id = n.id)
+          AND l2.source_note_id != ? AND l2.target_note_id != ?) AS linked_degree
      FROM note_links l
      INNER JOIN notes n ON n.id = l.source_note_id AND n.deleted_at IS NULL
      WHERE l.target_note_id = ?
      ORDER BY l.created_at DESC`,
-    [noteId]
+    [noteId, noteId, noteId]
   );
 
   return {
@@ -138,6 +150,7 @@ export async function getConnectionsForNote(
       linkedNoteId: r.target_note_id,
       linkedNoteTitle: r.linked_title,
       linkedNoteType: r.linked_type as NoteType,
+      linkedDegree: r.linked_degree ?? 0,
     })),
     backlinks: incomingRows.map((r) => ({
       id: r.id,
@@ -150,6 +163,7 @@ export async function getConnectionsForNote(
       linkedNoteId: r.source_note_id,
       linkedNoteTitle: r.linked_title,
       linkedNoteType: r.linked_type as NoteType,
+      linkedDegree: r.linked_degree ?? 0,
     })),
   };
 }

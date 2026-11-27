@@ -61,6 +61,51 @@ export interface ListNotesOptions {
   offset?: number;
 }
 
+async function attachTagsToNotes(db: DatabaseAdapter, notes: Note[]): Promise<Note[]> {
+  if (notes.length === 0) return notes;
+  const placeholders = notes.map(() => '?').join(', ');
+  const rows = await db.getAllAsync<{
+    note_id: string;
+    id: string;
+    name: string;
+    created_at: string;
+  }>(
+    `SELECT nt.note_id, t.id, t.name, t.created_at
+     FROM note_tags nt
+     INNER JOIN tags t ON t.id = nt.tag_id
+     WHERE nt.note_id IN (${placeholders})
+     ORDER BY t.name ASC`,
+    notes.map((n) => n.id)
+  );
+
+  const byNote = new Map<string, Note['tags']>();
+  for (const row of rows) {
+    const list = byNote.get(row.note_id) ?? [];
+    list.push({ id: row.id, name: row.name, createdAt: row.created_at });
+    byNote.set(row.note_id, list);
+  }
+
+  for (const note of notes) {
+    note.tags = byNote.get(note.id) ?? [];
+  }
+  return notes;
+}
+
+export async function listNotesByIds(db: DatabaseAdapter, ids: UUID[]): Promise<Note[]> {
+  if (ids.length === 0) return [];
+  const placeholders = ids.map(() => '?').join(', ');
+  const rows = await db.getAllAsync<NoteRow>(
+    `SELECT n.*, c.name AS collection_name
+     FROM notes n
+     LEFT JOIN collections c ON c.id = n.collection_id AND c.deleted_at IS NULL
+     WHERE n.deleted_at IS NULL AND n.id IN (${placeholders})`,
+    ids
+  );
+  const byId = new Map(rows.map((r) => [r.id, mapNote(r)]));
+  const ordered = ids.map((id) => byId.get(id)).filter((n): n is Note => Boolean(n));
+  return attachTagsToNotes(db, ordered);
+}
+
 export async function listNotes(
   db: DatabaseAdapter,
   options: ListNotesOptions = {}
@@ -138,10 +183,7 @@ export async function listNotes(
   );
 
   const notes = rows.map(mapNote);
-  for (const note of notes) {
-    note.tags = await getTagsForNote(db, note.id);
-  }
-  return notes;
+  return attachTagsToNotes(db, notes);
 }
 
 export async function getNoteById(db: DatabaseAdapter, id: UUID): Promise<Note | null> {
