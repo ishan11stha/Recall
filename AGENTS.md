@@ -25,9 +25,16 @@ Run lint and typecheck before declaring any task done.
 
 ## Navigation & Routing
 
-- Use **Expo Router** for all navigation. Routes live in `src/app/` — every file there is a screen, `_layout.tsx` files define navigators. Keep non-route code (components, hooks, utils) outside `src/app/`.
+- Use **Expo Router** for all navigation. Routes live in `app/` (`app/(tabs)/` for the 3 core tabs: Notes, Mind Map, Review; `app/notes/` and `app/flashcards/` for detail/study screens). Keep non-route code (components, database, services, theme, utils) in `src/`.
 - Import `Link`, `router`, and `useLocalSearchParams` from `expo-router`.
 - Docs: https://docs.expo.dev/router/introduction.md
+
+## RECALL Architecture & Build Guardrails
+
+- **Lean 3-Tab Scope:** Keep the UI ultra-clean and minimalist (generous whitespace, monochrome surfaces + one subtle accent, single-column focus) centered on **Notes**, **Mind Map**, and **Review**.
+- **No raw SQL in UI screens:** All SQLite/FTS5 queries belong in `src/database/repositories/` or `src/services/`.
+- **Keep APK lean:** Only keep native Expo/RN dependencies actively used by the app. Maintain R8 minification & resource shrinking in `app.json` (`expo-build-properties`).
+- **EAS & Lockfile hygiene:** Keep `.npmrc` (`legacy-peer-deps=true`) committed and verify `npx expo install --check` and `npm ci --dry-run` before triggering EAS builds.
 
 ## Building with EAS
 

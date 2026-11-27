@@ -5,5 +5,8 @@ module.exports = defineConfig([
   expoConfig,
   {
     ignores: ['dist/*', 'node_modules/*', '.expo/*'],
+    rules: {
+      'import/no-unresolved': ['error', { ignore: ['^expo-router$'] }],
+    },
   },
 ]);

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   FlatList,
   Pressable,
+  ScrollView,
   StyleSheet,
   TextInput,
   View,
@@ -13,12 +14,13 @@ import { useTheme } from '../../src/theme/ThemeProvider';
 import { useAppStore } from '../../src/stores/useAppStore';
 import { getDatabase } from '../../src/database/client';
 import { createNote, listNotes } from '../../src/database/repositories/notesRepo';
+import { listTags } from '../../src/database/repositories/tagsRepo';
 import { saveAppSettings } from '../../src/database/repositories/settingsRepo';
 import { searchService } from '../../src/services/search/searchService';
-import type { Note } from '../../src/types/models';
+import type { Note, Tag } from '../../src/types/models';
 import { formatRelativeDate } from '../../src/utils/id';
 import { AppText } from '../../src/components/ui/AppText';
-import { Divider, EmptyState } from '../../src/components/ui/Primitives';
+import { Chip, Divider, EmptyState } from '../../src/components/ui/Primitives';
 
 export default function NotesHomeScreen() {
   const router = useRouter();
@@ -28,19 +30,27 @@ export default function NotesHomeScreen() {
   const setSettings = useAppStore((s) => s.setSettings);
 
   const [notes, setNotes] = useState<Note[]>([]);
+  const [tags, setTags] = useState<Tag[]>([]);
+  const [selectedTagId, setSelectedTagId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
 
-  const loadNotes = useCallback(async (searchText: string) => {
+  const loadNotes = useCallback(async (searchText: string, tagId: string | null) => {
     const db = await getDatabase();
+    const allTags = await listTags(db);
+    setTags(allTags.filter((t) => (t.noteCount ?? 0) > 0));
+
     const trimmed = searchText.trim();
     if (trimmed.length >= 2) {
-      const hits = await searchService.search(db, trimmed, { includeResources: false });
+      const hits = await searchService.search(db, trimmed, {
+        includeResources: false,
+        tagId,
+      });
       const noteIds = new Set(hits.filter((h) => h.entityType === 'note').map((h) => h.id));
-      const all = await listNotes(db, { limit: 200 });
+      const all = await listNotes(db, { tagId, limit: 200 });
       setNotes(all.filter((n) => noteIds.has(n.id)));
     } else if (trimmed.length === 1) {
-      const all = await listNotes(db, { limit: 200 });
+      const all = await listNotes(db, { tagId, limit: 200 });
       const lower = trimmed.toLowerCase();
       setNotes(
         all.filter(
@@ -49,22 +59,22 @@ export default function NotesHomeScreen() {
         )
       );
     } else {
-      setNotes(await listNotes(db, { limit: 200 }));
+      setNotes(await listNotes(db, { tagId, limit: 200 }));
     }
     setLoading(false);
   }, []);
 
   useFocusEffect(
     useCallback(() => {
-      void loadNotes(query);
-    }, [loadNotes, query])
+      void loadNotes(query, selectedTagId);
+    }, [loadNotes, query, selectedTagId])
   );
 
   useEffect(() => {
     if (dataVersion > 0) {
-      void Promise.resolve().then(() => loadNotes(query));
+      void Promise.resolve().then(() => loadNotes(query, selectedTagId));
     }
-  }, [dataVersion, loadNotes, query]);
+  }, [dataVersion, loadNotes, query, selectedTagId]);
 
   const handleCreateNote = async () => {
     const db = await getDatabase();
@@ -141,6 +151,31 @@ export default function NotesHomeScreen() {
           ) : null}
         </View>
       </View>
+
+      {/* Quiet #tag Filter Row (only shown when tags exist) */}
+      {tags.length > 0 ? (
+        <View style={{ paddingHorizontal: 22, paddingBottom: 8 }}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ gap: 6 }}
+          >
+            <Chip
+              label="All"
+              selected={selectedTagId === null}
+              onPress={() => setSelectedTagId(null)}
+            />
+            {tags.map((t) => (
+              <Chip
+                key={t.id}
+                label={`#${t.name}`}
+                selected={selectedTagId === t.id}
+                onPress={() => setSelectedTagId(selectedTagId === t.id ? null : t.id)}
+              />
+            ))}
+          </ScrollView>
+        </View>
+      ) : null}
 
       {/* Clean Single-Column List */}
       <FlatList

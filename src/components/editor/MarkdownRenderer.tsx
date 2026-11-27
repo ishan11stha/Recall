@@ -1,55 +1,118 @@
 import React from 'react';
-import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useTheme } from '../../theme/ThemeProvider';
 import { AppText } from '../ui/AppText';
 
 interface MarkdownRendererProps {
   content: string;
   onToggleChecklistLine?: (lineIndex: number) => void;
+  onPressWikilink?: (targetTitle: string) => void;
+  onPressLink?: (url: string) => void;
 }
 
-function renderInlineSpans(
-  line: string,
-  baseColor: string,
-  accentColor: string,
-  codeBg: string,
-  monoFont: string
-): React.ReactNode[] {
-  // Tokenize bold (**x**), italic (*x*), underline (<u>x</u>), inline code (`x`), links ([label](url))
-  const regex = /(\*\*[^*]+\*\*|\*[^*]+\*|<u>[^<]+<\/u>|`[^`]+`|\[[^\]]+\]\([^)]+\))/g;
+interface InlineContext {
+  baseColor: string;
+  accentColor: string;
+  accentSoft: string;
+  warningSoft: string;
+  codeBg: string;
+  monoFont: string;
+  onPressWikilink?: (targetTitle: string) => void;
+  onPressLink?: (url: string) => void;
+}
+
+function renderInlineSpans(line: string, ctx: InlineContext): React.ReactNode[] {
+  const regex =
+    /(\[\[[^[\]]+\]\]|==[^=]+==|~~[^~]+~~|\*\*[^*]+\*\*|\*[^*]+\*|<u>[^<]+<\/u>|`[^`]+`|\[[^\]]+\]\([^)]+\)|(?:^|\s)#[a-zA-Z][a-zA-Z0-9_-]*)/g;
   const parts = line.split(regex);
 
   return parts.map((part, idx) => {
     if (!part) return null;
-    if (part.startsWith('**') && part.endsWith('**')) {
+
+    // [[Wikilink]] or [[Target|Alias]]
+    if (part.startsWith('[[') && part.endsWith(']]')) {
+      const inner = part.slice(2, -2);
+      const [rawTarget, rawAlias] = inner.split('|');
+      const target = rawTarget.trim();
+      const label = (rawAlias ?? rawTarget).trim();
       return (
-        <Text key={idx} style={{ fontWeight: '700', color: baseColor }}>
+        <Text
+          key={idx}
+          onPress={ctx.onPressWikilink ? () => ctx.onPressWikilink?.(target) : undefined}
+          style={{
+            color: ctx.accentColor,
+            backgroundColor: ctx.accentSoft,
+            fontWeight: '600',
+          }}
+        >
+          {` ${label} `}
+        </Text>
+      );
+    }
+
+    // ==Highlight==
+    if (part.startsWith('==') && part.endsWith('==')) {
+      return (
+        <Text
+          key={idx}
+          style={{
+            backgroundColor: ctx.warningSoft,
+            color: ctx.baseColor,
+          }}
+        >
           {part.slice(2, -2)}
         </Text>
       );
     }
+
+    // ~~Strikethrough~~
+    if (part.startsWith('~~') && part.endsWith('~~')) {
+      return (
+        <Text
+          key={idx}
+          style={{
+            textDecorationLine: 'line-through',
+            color: ctx.baseColor,
+            opacity: 0.65,
+          }}
+        >
+          {part.slice(2, -2)}
+        </Text>
+      );
+    }
+
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return (
+        <Text key={idx} style={{ fontWeight: '700', color: ctx.baseColor }}>
+          {part.slice(2, -2)}
+        </Text>
+      );
+    }
+
     if (part.startsWith('*') && part.endsWith('*')) {
       return (
-        <Text key={idx} style={{ fontStyle: 'italic', color: baseColor }}>
+        <Text key={idx} style={{ fontStyle: 'italic', color: ctx.baseColor }}>
           {part.slice(1, -1)}
         </Text>
       );
     }
+
     if (part.startsWith('<u>') && part.endsWith('</u>')) {
       return (
-        <Text key={idx} style={{ textDecorationLine: 'underline', color: baseColor }}>
+        <Text key={idx} style={{ textDecorationLine: 'underline', color: ctx.baseColor }}>
           {part.slice(3, -4)}
         </Text>
       );
     }
+
     if (part.startsWith('`') && part.endsWith('`')) {
       return (
         <Text
           key={idx}
           style={{
-            fontFamily: monoFont,
-            backgroundColor: codeBg,
-            color: baseColor,
+            fontFamily: ctx.monoFont,
+            backgroundColor: ctx.codeBg,
+            color: ctx.baseColor,
             fontSize: 13,
           }}
         >
@@ -57,21 +120,39 @@ function renderInlineSpans(
         </Text>
       );
     }
+
     const linkMatch = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
     if (linkMatch) {
       const [, label, url] = linkMatch;
       return (
         <Text
           key={idx}
-          style={{ color: accentColor, textDecorationLine: 'underline' }}
+          style={{ color: ctx.accentColor, textDecorationLine: 'underline' }}
           onPress={() => {
-            Linking.openURL(url).catch(() => {});
+            if (ctx.onPressLink) {
+              ctx.onPressLink(url);
+            } else {
+              Linking.openURL(url).catch(() => {});
+            }
           }}
         >
           {label}
         </Text>
       );
     }
+
+    // Inline #tag
+    if (/^\s?#[a-zA-Z][a-zA-Z0-9_-]*$/.test(part)) {
+      const leadingSpace = part.startsWith(' ') ? ' ' : '';
+      const tagText = part.trim();
+      return (
+        <Text key={idx}>
+          {leadingSpace}
+          <Text style={{ color: ctx.accentColor, fontWeight: '500' }}>{tagText}</Text>
+        </Text>
+      );
+    }
+
     return <Text key={idx}>{part}</Text>;
   });
 }
@@ -79,10 +160,23 @@ function renderInlineSpans(
 export function MarkdownRenderer({
   content,
   onToggleChecklistLine,
+  onPressWikilink,
+  onPressLink,
 }: MarkdownRendererProps) {
   const { colors, fonts, radius } = useTheme();
   const lines = content.split('\n');
   const blocks: React.ReactNode[] = [];
+
+  const inlineCtx: InlineContext = {
+    baseColor: colors.textPrimary,
+    accentColor: colors.accent,
+    accentSoft: colors.accentSoft,
+    warningSoft: colors.warningSoft,
+    codeBg: colors.surfaceSubtle,
+    monoFont: fonts.monoRegular,
+    onPressWikilink,
+    onPressLink,
+  };
 
   let inCodeBlock = false;
   let codeLines: string[] = [];
@@ -123,10 +217,34 @@ export function MarkdownRenderer({
       return;
     }
 
+    // Inline Image: ![alt](uri)
+    const imgMatch = rawLine.trim().match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
+    if (imgMatch) {
+      const [, alt, uri] = imgMatch;
+      blocks.push(
+        <View key={index} style={{ marginVertical: 8, gap: 4 }}>
+          <Image
+            source={{ uri }}
+            style={[
+              styles.inlineImage,
+              { borderRadius: radius.md, borderColor: colors.border },
+            ]}
+            resizeMode="cover"
+          />
+          {alt ? (
+            <AppText variant="caption" color="tertiary">
+              {alt}
+            </AppText>
+          ) : null}
+        </View>
+      );
+      return;
+    }
+
     // Headings
     if (rawLine.startsWith('### ')) {
       blocks.push(
-        <AppText key={index} variant="h3" style={{ marginTop: 10, marginBottom: 4 }}>
+        <AppText key={index} variant="h3" style={{ marginTop: 12, marginBottom: 4 }}>
           {rawLine.slice(4)}
         </AppText>
       );
@@ -134,7 +252,7 @@ export function MarkdownRenderer({
     }
     if (rawLine.startsWith('## ')) {
       blocks.push(
-        <AppText key={index} variant="h2" style={{ marginTop: 12, marginBottom: 4 }}>
+        <AppText key={index} variant="h2" style={{ marginTop: 14, marginBottom: 4 }}>
           {rawLine.slice(3)}
         </AppText>
       );
@@ -142,7 +260,7 @@ export function MarkdownRenderer({
     }
     if (rawLine.startsWith('# ')) {
       blocks.push(
-        <AppText key={index} variant="h1" style={{ marginTop: 14, marginBottom: 6 }}>
+        <AppText key={index} variant="h1" style={{ marginTop: 16, marginBottom: 6 }}>
           {rawLine.slice(2)}
         </AppText>
       );
@@ -183,13 +301,10 @@ export function MarkdownRenderer({
               checked ? { textDecorationLine: 'line-through' } : undefined,
             ]}
           >
-            {renderInlineSpans(
-              text,
-              checked ? colors.textSecondary : colors.textPrimary,
-              colors.accent,
-              colors.surfaceSubtle,
-              fonts.monoRegular
-            )}
+            {renderInlineSpans(text, {
+              ...inlineCtx,
+              baseColor: checked ? colors.textSecondary : colors.textPrimary,
+            })}
           </AppText>
         </Pressable>
       );
@@ -205,13 +320,7 @@ export function MarkdownRenderer({
             •
           </AppText>
           <AppText variant="body" style={{ flex: 1 }}>
-            {renderInlineSpans(
-              bulletMatch[1],
-              colors.textPrimary,
-              colors.accent,
-              colors.surfaceSubtle,
-              fonts.monoRegular
-            )}
+            {renderInlineSpans(bulletMatch[1], inlineCtx)}
           </AppText>
         </View>
       );
@@ -227,14 +336,43 @@ export function MarkdownRenderer({
             {numMatch[1]}
           </AppText>
           <AppText variant="body" style={{ flex: 1 }}>
-            {renderInlineSpans(
-              numMatch[2],
-              colors.textPrimary,
-              colors.accent,
-              colors.surfaceSubtle,
-              fonts.monoRegular
-            )}
+            {renderInlineSpans(numMatch[2], inlineCtx)}
           </AppText>
+        </View>
+      );
+      return;
+    }
+
+    // Callout: > [!note] Title / text
+    const calloutMatch = rawLine.match(/^>\s*\[!(note|tip|warning|important|info)\]\s*(.*)$/i);
+    if (calloutMatch) {
+      const kind = calloutMatch[1].toLowerCase();
+      const body = calloutMatch[2] || kind.toUpperCase();
+      const accent =
+        kind === 'warning'
+          ? colors.warning
+          : kind === 'tip'
+          ? colors.success
+          : colors.accent;
+      const bg =
+        kind === 'warning'
+          ? colors.warningSoft
+          : kind === 'tip'
+          ? colors.successSoft
+          : colors.accentSoft;
+
+      blocks.push(
+        <View
+          key={index}
+          style={[
+            styles.callout,
+            { borderLeftColor: accent, backgroundColor: bg, borderRadius: radius.sm },
+          ]}
+        >
+          <AppText variant="caption" style={{ color: accent, fontWeight: '700' }}>
+            {kind.toUpperCase()}
+          </AppText>
+          <AppText variant="bodySmall">{renderInlineSpans(body, inlineCtx)}</AppText>
         </View>
       );
       return;
@@ -251,13 +389,10 @@ export function MarkdownRenderer({
           ]}
         >
           <AppText variant="body" color="secondary" style={{ fontStyle: 'italic' }}>
-            {renderInlineSpans(
-              rawLine.slice(2),
-              colors.textSecondary,
-              colors.accent,
-              colors.surface,
-              fonts.monoRegular
-            )}
+            {renderInlineSpans(rawLine.slice(2), {
+              ...inlineCtx,
+              baseColor: colors.textSecondary,
+            })}
           </AppText>
         </View>
       );
@@ -269,7 +404,7 @@ export function MarkdownRenderer({
       blocks.push(
         <View
           key={index}
-          style={{ height: 1, backgroundColor: colors.border, marginVertical: 10 }}
+          style={{ height: 1, backgroundColor: colors.border, marginVertical: 12 }}
         />
       );
       return;
@@ -278,13 +413,7 @@ export function MarkdownRenderer({
     // Regular paragraph
     blocks.push(
       <AppText key={index} variant="body" style={{ marginBottom: 4 }}>
-        {renderInlineSpans(
-          rawLine,
-          colors.textPrimary,
-          colors.accent,
-          colors.surfaceSubtle,
-          fonts.monoRegular
-        )}
+        {renderInlineSpans(rawLine, inlineCtx)}
       </AppText>
     );
   });
@@ -311,6 +440,11 @@ export function MarkdownRenderer({
 }
 
 const styles = StyleSheet.create({
+  inlineImage: {
+    width: '100%',
+    height: 220,
+    borderWidth: 1,
+  },
   codeBlock: {
     borderWidth: 1,
     padding: 12,
@@ -330,6 +464,13 @@ const styles = StyleSheet.create({
     marginTop: 2,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  callout: {
+    borderLeftWidth: 3,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginVertical: 6,
+    gap: 3,
   },
   quote: {
     borderLeftWidth: 3,
